@@ -26,8 +26,8 @@ public:
 protected:
   //Book histograms
   void bookHistograms(DQMStore::IBooker&, edm::Run const&, edm::EventSetup const&) override;
-  void dqmBeginRun(const edm::Run&, const edm::EventSetup&) override {}
-  void endRun(const edm::Run&, const edm::EventSetup&) override {}
+  //void dqmBeginRun(const edm::Run&, const edm::EventSetup&) override {}
+  //void endRun(const edm::Run&, const edm::EventSetup&) override {}
 
 private:
   class Plot1DInBin {
@@ -114,12 +114,16 @@ private:
   };
 
   std::vector<Plot1DInBin> jetResponsePlots;
+  std::vector<Plot1DInBin> jetResponsePlots_noJEC;
   std::vector<Plot1DInBinVariable> genJetPlots;
 
   // Is this data or MC?
   bool isMC;
 
   float jetDeltaR;
+
+  std::string jetCollectionName;
+  std::string genJetCollectionName;
 
   edm::InputTag recoJetsLabel;
   edm::InputTag genJetsLabel;
@@ -149,6 +153,15 @@ void PFJetAnalyzerDQM::prepareJetResponsePlots(const std::vector<edm::ParameterS
 
     jetResponsePlots.push_back(Plot1DInBin(
         name, title, response_nbins, response_low, response_high, ptbin_low, ptbin_high, etabin_low, etabin_high));
+    jetResponsePlots_noJEC.push_back(Plot1DInBin(name + " noJEC",
+                                                 title + " no JEC",
+                                                 response_nbins,
+                                                 response_low,
+                                                 response_high,
+                                                 ptbin_low,
+                                                 ptbin_high,
+                                                 etabin_low,
+                                                 etabin_high));
   }
   if (jetResponsePlots.size() > 200) {
     throw std::runtime_error("Requested too many jet response plots, aborting as this seems unusual.");
@@ -189,6 +202,11 @@ PFJetAnalyzerDQM::PFJetAnalyzerDQM(const edm::ParameterSet& iConfig) {
   recoJetsLabel = iConfig.getParameter<edm::InputTag>("recoJetCollection");
   genJetsLabel = iConfig.getParameter<edm::InputTag>("genJetCollection");
 
+  //label for making new folder
+  //jetCollectionName = iConfig.getParameter<edm::InputTag>("src").label();
+  jetCollectionName = recoJetsLabel.label();
+  genJetCollectionName = genJetsLabel.label();
+
   //DeltaR for reco to gen jet matching
   jetDeltaR = iConfig.getParameter<double>("jetDeltaR");
 
@@ -204,7 +222,7 @@ PFJetAnalyzerDQM::PFJetAnalyzerDQM(const edm::ParameterSet& iConfig) {
 }
 
 void PFJetAnalyzerDQM::fillJetResponse(edm::View<pat::Jet>& recoJetCollection, edm::View<reco::Jet>& genJetCollection) {
-  bool use_rawpt = false;
+  //bool use_rawpt = false;
 
   //match gen jets to reco jets, require minimum jetDeltaR, choose closest, do not try to match charge
   std::vector<int> matchIndices;
@@ -227,9 +245,12 @@ void PFJetAnalyzerDQM::fillJetResponse(edm::View<pat::Jet>& recoJetCollection, e
     if (iMatch != -1) {
       const auto& recoJet = recoJetCollection[iMatch];
       auto pt_reco = recoJet.pt();
+      /*
       if (use_rawpt)
         pt_reco *= recoJet.jecFactor("Uncorrected");
+      */
       const auto response = pt_reco / pt_gen;
+      const auto response_raw = pt_reco * recoJet.jecFactor("Uncorrected") / pt_gen;
 
       //Loop linearly through all plots and check if they match the pt and eta bin
       //this is not algorithmically optimal but we don't expect to more than a few hundred plots
@@ -239,19 +260,29 @@ void PFJetAnalyzerDQM::fillJetResponse(edm::View<pat::Jet>& recoJetCollection, e
           plot.fill(response);
         }
       }
+      // this loop should be for NoJEC plots
+      for (auto& plot : jetResponsePlots_noJEC) {
+        if (plot.isInPtEtaBin(pt_gen, eta_gen)) {
+          plot.fill(response_raw);
+        }
+      }
     }
   }
 }
 
 void PFJetAnalyzerDQM::bookHistograms(DQMStore::IBooker& booker, edm::Run const&, edm::EventSetup const&) {
   //std::cout << "PFJetAnalyzerDQM booking response histograms" << std::endl;
-  booker.setCurrentFolder("ParticleFlow/JetResponse/");
+  booker.setCurrentFolder("ParticleFlow/JetResponse/" + jetCollectionName);
   for (auto& plot : jetResponsePlots) {
     plot.book(booker);
   }
-
+  //Book plots for noJEC
+  booker.setCurrentFolder("ParticleFlow/JetResponse/" + jetCollectionName + "noJEC");
+  for (auto& plot : jetResponsePlots_noJEC) {
+    plot.book(booker);
+  }
   //Book plots for gen-jet pt spectra
-  booker.setCurrentFolder("ParticleFlow/GenJets/");
+  booker.setCurrentFolder("ParticleFlow/GenJets/" + genJetCollectionName);
   for (auto& plot : genJetPlots) {
     plot.book(booker);
   }
